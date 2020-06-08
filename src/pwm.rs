@@ -37,7 +37,71 @@ pub struct Pwm<TIM, CHANNEL> {
 }
 
 macro_rules! impl_pwm_pin {
-    ($TIMX:ident, $af:expr, C1) => {
+    (TIM9, C1) => {
+        impl hal::PwmPin for Pwm<TIM9, C1> {
+            type Duty = u16;
+
+            fn disable(&mut self) {
+                // unsafe {
+                //     (*TIM9::ptr()).ccer.modify(|_, w| w.cc1e().clear_bit());
+                // }
+            }
+
+            fn enable(&mut self) {
+                unsafe {
+                    let tim = &*TIM9::ptr();
+                    tim.ccmr1_output()
+                        .modify(|_, w| w.oc1pe().set_bit().oc1m().bits(6));
+                    // tim.ccer.modify(|_, w| w.cc1e().set_bit());
+                }
+            }
+
+            fn get_duty(&self) -> u16 {
+                unsafe { (*TIM9::ptr()).ccr1.read().ccr().bits() }
+            }
+
+            fn get_max_duty(&self) -> u16 {
+                unsafe { (*TIM9::ptr()).arr.read().arr().bits() }
+            }
+
+            fn set_duty(&mut self, duty: u16) {
+                unsafe { (*TIM9::ptr()).ccr1.write(|w| w.ccr().bits(duty)) }
+            }
+        }
+    };
+    (TIM9, C2) => {
+        impl hal::PwmPin for Pwm<TIM9, C2> {
+            type Duty = u16;
+
+            fn disable(&mut self) {
+                // unsafe {
+                //     (*TIM9::ptr()).ccer.modify(|_, w| w.cc2e().clear_bit());
+                // }
+            }
+
+            fn enable(&mut self) {
+                unsafe {
+                    let tim = &*TIM9::ptr();
+                    tim.ccmr1_output()
+                        .modify(|_, w| w.oc2pe().set_bit().oc2m().bits(6));
+                    // tim.ccer.modify(|_, w| w.cc2e().set_bit());
+                }
+            }
+
+            fn get_duty(&self) -> u16 {
+                unsafe { (*TIM9::ptr()).ccr2.read().ccr().bits() }
+            }
+
+            fn get_max_duty(&self) -> u16 {
+                unsafe { (*TIM9::ptr()).arr.read().arr().bits() }
+            }
+
+            fn set_duty(&mut self, duty: u16) {
+                unsafe { (*TIM9::ptr()).ccr2.write(|w| w.ccr().bits(duty)) }
+            }
+        }
+    };
+    ($TIMX:ident, C1) => {
         impl hal::PwmPin for Pwm<$TIMX, C1> {
             type Duty = u16;
 
@@ -69,7 +133,7 @@ macro_rules! impl_pwm_pin {
             }
         }
     };
-    ($TIMX:ident, $af:expr, C2) => {
+    ($TIMX:ident, C2) => {
         impl hal::PwmPin for Pwm<$TIMX, C2> {
             type Duty = u16;
 
@@ -101,7 +165,7 @@ macro_rules! impl_pwm_pin {
             }
         }
     };
-    ($TIMX:ident, $af:expr, C3) => {
+    ($TIMX:ident, C3) => {
         impl hal::PwmPin for Pwm<$TIMX, C3> {
             type Duty = u16;
 
@@ -133,7 +197,7 @@ macro_rules! impl_pwm_pin {
             }
         }
     };
-    ($TIMX:ident, $af:expr, C4) => {
+    ($TIMX:ident, C4) => {
         impl hal::PwmPin for Pwm<$TIMX, C4> {
             type Duty = u16;
 
@@ -165,9 +229,38 @@ macro_rules! impl_pwm_pin {
             }
         }
     };
+
 }
 
-macro_rules! channels {
+macro_rules! impl_pins {
+     ($TIMX:ident, $af:expr, ($CX:ident: $pinx:ty, $CY:ident: $piny:ty)) => {
+        impl Pins<$TIMX> for ($pinx, $piny) {
+            type Channels = (
+                Pwm<$TIMX, $CX>,
+                Pwm<$TIMX, $CY>
+            );
+
+            fn setup(&self) {
+                self.0.set_alt_mode($af);
+                self.1.set_alt_mode($af);
+            }
+        }
+    };
+    ($TIMX:ident, $af:expr, ($CX:ident: $pinx:ty, $CY:ident: $piny:ty, $CZ:ident: $pinz:ty)) => {
+        impl Pins<$TIMX> for ($pinx, $piny, $pinz) {
+            type Channels = (
+                Pwm<$TIMX, $CX>,
+                Pwm<$TIMX, $CY>,
+                Pwm<$TIMX, $CZ>,
+            );
+
+            fn setup(&self) {
+                self.0.set_alt_mode($af);
+                self.1.set_alt_mode($af);
+                self.2.set_alt_mode($af);
+            }
+        }
+    };
     ($TIMX:ident, $af:expr, $($c:ident, $pin:ty),+) => {
         $(
             impl Pins<$TIMX> for $pin {
@@ -179,31 +272,33 @@ macro_rules! channels {
             }
         )+
     };
+}
+
+macro_rules! channels {
+    ($TIMX:ident, $af:expr, $($c:ident, $pin:ty),+) => {
+        impl_pins!($TIMX, $af, $($c, $pin),+);
+    };
     ($TIMX:ident, $af:expr, $c1:ty) => {
-        channels!($TIMX, $af, C1, $c1);
-        impl_pwm_pin!($TIMX, $af, C1);
+        impl_pins!($TIMX, $af, C1, $c1);
+        impl_pwm_pin!($TIMX, C1);
     };
     ($TIMX:ident, $af:expr, $c1:ty, $c2:ty) => {
         channels!($TIMX, $af, $c1);
 
-        channels!($TIMX, $af, C2, $c2);
+        impl_pins!($TIMX, $af, C2, $c2);
+        impl_pins!($TIMX, $af, (C1: $c1, C2: $c2));
 
-        impl Pins<$TIMX> for ($c1, $c2) {
-            type Channels = (Pwm<$TIMX, C1>, Pwm<$TIMX, C2>);
-
-            fn setup(&self) {
-                self.0.set_alt_mode($af);
-                self.1.set_alt_mode($af);
-            }
-        }
-
-        impl_pwm_pin!($TIMX, $af, C2);
+        impl_pwm_pin!($TIMX, C2);
     };
     ($TIMX:ident, $af:expr, $c1:ty, $c2:ty, $c3:ty, $c4:ty) => {
         channels!($TIMX, $af, $c1, $c2);
 
-        channels!($TIMX, $af, C3, $c3, C4, $c4);
-
+        impl_pins!($TIMX, $af, C3, $c3, C4, $c4);
+        impl_pins!($TIMX, $af, (C1: $c1, C3: $c3));
+        impl_pins!($TIMX, $af, (C1: $c1, C4: $c4));
+        impl_pins!($TIMX, $af, (C2: $c2, C3: $c3));
+        impl_pins!($TIMX, $af, (C2: $c2, C4: $c4));
+        impl_pins!($TIMX, $af, (C3: $c3, C4: $c4));
         impl Pins<$TIMX> for ($c1, $c2, $c3, $c4) {
             type Channels = (
                 Pwm<$TIMX, C1>,
@@ -220,8 +315,8 @@ macro_rules! channels {
             }
         }
 
-        impl_pwm_pin!($TIMX, $af, C3);
-        impl_pwm_pin!($TIMX, $af, C4);
+        impl_pwm_pin!($TIMX, C3);
+        impl_pwm_pin!($TIMX, C4);
     };
 }
 
@@ -347,24 +442,23 @@ channels!(TIM5, AltMode::TIM3_5,
     C4, PF9<Input<Floating>>
 );
 
-// TODO: TIM9 support
-// channels!(
-//     TIM9,
-//     AltMode::TIM9_11,
-//     PA2<Input<Floating>>,
-//     PA3<Input<Floating>>
-// );
-// channels!(TIM9,AltMode::TIM9_11,
-//     C1, PB13<Input<Floating>>,
-//     C2, PB14<Input<Floating>>,
+channels!(
+    TIM9,
+    AltMode::TIM9_11,
+    PA2<Input<Floating>>,
+    PA3<Input<Floating>>
+);
+channels!(TIM9,AltMode::TIM9_11,
+    C1, PB13<Input<Floating>>,
+    C2, PB14<Input<Floating>>,
 
-//     C1, PD0<Input<Floating>>,
+    C1, PD0<Input<Floating>>,
 
-//     C2, PD7<Input<Floating>>,
+    C2, PD7<Input<Floating>>,
 
-//     C1, PE5<Input<Floating>>,
-//     C2, PE6<Input<Floating>>
-// );
+    C1, PE5<Input<Floating>>,
+    C2, PE6<Input<Floating>>
+);
 
 channels!(TIM10, AltMode::TIM9_11, PA6<Input<Floating>>);
 channels!(TIM10, AltMode::TIM9_11,
@@ -385,7 +479,7 @@ timers! {
     TIM3: (apb1_clk, apb1enr, apb1rstr, tim3, tim3en, tim3rst),
     TIM4: (apb1_clk, apb1enr, apb1rstr, tim4, tim4en, tim4rst),
     TIM5: (apb1_clk, apb1enr, apb1rstr, tim5, tim5en, tim5rst),
-    // TIM9: (apb2_clk, apb2enr, apb2rstr, tim9, tim9en, tim9rst),
+    TIM9: (apb2_clk, apb2enr, apb2rstr, tim9, tim9en, tim9rst),
     TIM10: (apb2_clk, apb2enr, apb2rstr, tim10, tim10en, tm10rst),
     TIM11: (apb2_clk, apb2enr, apb2rstr, tim11, tim11en, tm11rst),
 }
