@@ -11,11 +11,11 @@ compile_error!("This crate requires one of the following features enabled: stm32
 
 extern crate bare_metal;
 extern crate cast;
-extern crate cortex_m;
 extern crate void;
 
 pub extern crate embedded_hal as hal;
 pub extern crate nb;
+pub extern crate cortex_m;
 pub extern crate stm32l1;
 
 pub use nb::block;
