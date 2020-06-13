@@ -5,7 +5,9 @@ use crate::gpio::gpioa::{PA0, PA1, PA2, PA3, PA5, PA6, PA7, PA15};
 use crate::gpio::gpiob::{PB0, PB1, PB3, PB4, PB5, PB6, PB7, PB8, PB9, PB10, PB11, PB12, PB13, PB14, PB15};
 use crate::gpio::gpioc::{PC6, PC7, PC8, PC9};
 use crate::gpio::gpiod::{PD0, PD7, PD12, PD13, PD14, PD15};
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
 use crate::gpio::gpioe::{PE0, PE1, PE3, PE4, PE5, PE6, PE9, PE10, PE11, PE12};
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
 use crate::gpio::gpiof::{PF6, PF7, PF8, PF9};
 use crate::gpio::{AltMode, Floating, Input};
 use crate::rcc::Rcc;
@@ -378,17 +380,19 @@ channels!(
 channels!(TIM2, AltMode::TIM2,
     C1, PA5<Input<Floating>>,
 
-    C1, PE9<Input<Floating>>,
-    C2, PE10<Input<Floating>>,
-    C3, PE11<Input<Floating>>,
-    C4, PE12<Input<Floating>>,
-
     C3, PB10<Input<Floating>>,
     C4, PB11<Input<Floating>>,
 
     C1, PA15<Input<Floating>>,
 
     C2, PB3<Input<Floating>>
+);
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
+channels!(TIM2, AltMode::TIM2,
+    C1, PE9<Input<Floating>>,
+    C2, PE10<Input<Floating>>,
+    C3, PE11<Input<Floating>>,
+    C4, PE12<Input<Floating>>
 );
 
 channels!(
@@ -400,9 +404,6 @@ channels!(
     PB1<Input<Floating>>
 );
 channels!(TIM3, AltMode::TIM3_5,
-    C1, PE3<Input<Floating>>,
-    C2, PE4<Input<Floating>>,
-
     C1, PC6<Input<Floating>>,
     C2, PC7<Input<Floating>>,
     C3, PC8<Input<Floating>>,
@@ -410,6 +411,11 @@ channels!(TIM3, AltMode::TIM3_5,
 
     C1, PB4<Input<Floating>>,
     C2, PB5<Input<Floating>>
+);
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
+channels!(TIM3, AltMode::TIM3_5,
+    C1, PE3<Input<Floating>>,
+    C2, PE4<Input<Floating>>
 );
 
 channels!(
@@ -435,6 +441,7 @@ channels!(
     PA2<Input<Floating>>,
     PA3<Input<Floating>>
 );
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
 channels!(TIM5, AltMode::TIM3_5,
     C1, PF6<Input<Floating>>,
     C2, PF7<Input<Floating>>,
@@ -454,8 +461,10 @@ channels!(TIM9,AltMode::TIM9_11,
 
     C1, PD0<Input<Floating>>,
 
-    C2, PD7<Input<Floating>>,
-
+    C2, PD7<Input<Floating>>
+);
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
+channels!(TIM9,AltMode::TIM9_11,
     C1, PE5<Input<Floating>>,
     C2, PE6<Input<Floating>>
 );
@@ -463,14 +472,20 @@ channels!(TIM9,AltMode::TIM9_11,
 channels!(TIM10, AltMode::TIM9_11, PA6<Input<Floating>>);
 channels!(TIM10, AltMode::TIM9_11,
     C1, PB8<Input<Floating>>,
-    C1, PB12<Input<Floating>>,
+    C1, PB12<Input<Floating>>
+);
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
+channels!(TIM10, AltMode::TIM9_11,
     C1, PE0<Input<Floating>>
 );
 
 channels!(TIM11, AltMode::TIM9_11, PA7<Input<Floating>>);
-channels!(TIM10, AltMode::TIM9_11,
+channels!(TIM11, AltMode::TIM9_11,
     C1, PB9<Input<Floating>>,
-    C1, PB15<Input<Floating>>,
+    C1, PB15<Input<Floating>>
+);
+#[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
+channels!(TIM11, AltMode::TIM9_11,
     C1, PE1<Input<Floating>>
 );
 
