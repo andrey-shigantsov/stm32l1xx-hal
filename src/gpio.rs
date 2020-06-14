@@ -48,7 +48,7 @@ pub enum Speed {
 }
 
 #[allow(dead_code)]
-pub(crate) enum AltMode {
+pub enum AltMode {
     SYSTEM = 0,
     TIM2 = 1,
     TIM3_5 = 2,
@@ -65,6 +65,10 @@ pub(crate) enum AltMode {
     EVENTOUT = 15,
 }
 
+pub trait AltModeExt {
+    fn set_alt_mode(&self, mode: AltMode);
+}
+
 macro_rules! gpio {
     ($GPIOX:ident, $gpiox:ident, $iopxenr:ident, $PXx:ident, [
         $($PXi:ident: ($pxi:ident, $i:expr, $MODE:ty),)+
@@ -78,7 +82,7 @@ macro_rules! gpio {
             use crate::stm32::$GPIOX;
             use crate::stm32::RCC;
             use super::{
-                Floating, GpioExt, Input, OpenDrain, Output, Speed,
+                Floating, GpioExt, AltModeExt, Input, OpenDrain, Output, Speed,
                 PullDown, PullUp, PushPull, AltMode, Analog
             };
 
@@ -284,9 +288,11 @@ macro_rules! gpio {
                         };
                         self
                     }
+                }
 
+                impl<MODE> AltModeExt for $PXi<MODE> {
                     #[allow(dead_code)]
-                    pub(crate) fn set_alt_mode(&self, mode: AltMode) {
+                    fn set_alt_mode(&self, mode: AltMode) {
                         let mode = mode as u32;
                         let offset = 2 * $i;
                         let offset2 = 4 * $i;

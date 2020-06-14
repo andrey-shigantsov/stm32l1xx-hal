@@ -2,7 +2,7 @@
 use hal::blocking::i2c::{Read, Write, WriteRead};
 
 use crate::gpio::gpiob::{PB10, PB11, PB6, PB7};
-use crate::gpio::{AltMode, OpenDrain, Output};
+use crate::gpio::{AltModeExt, AltMode, OpenDrain, Output};
 use crate::prelude::*;
 use crate::rcc::Rcc;
 use crate::stm32::{I2C1, I2C2};
