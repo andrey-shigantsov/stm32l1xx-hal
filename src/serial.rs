@@ -4,7 +4,7 @@ use core::ptr;
 
 use crate::gpio::gpioa::{PA10, PA2, PA3, PA9};
 use crate::gpio::gpiob::{PB10, PB11};
-use crate::gpio::{AltModeExt, AltMode, Floating, Input};
+use crate::gpio::{AltMode, Floating, Input};
 use crate::rcc::Rcc;
 use crate::stm32::{USART1, USART2, USART3};
 use hal;
