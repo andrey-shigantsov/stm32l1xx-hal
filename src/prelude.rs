@@ -23,3 +23,8 @@ pub use crate::time::U32Ext as _stm32l1xx_hal_time_U32Ext;
 pub use crate::timer::TimerExt as _stm32l1xx_hal_timer_TimerExt;
 pub use crate::watchdog::IndependedWatchdogExt as _stm32l1xx_hal_watchdog_IndependedWatchdogExt;
 pub use crate::watchdog::WindowWatchdogExt as _stm32l1xx_hal_watchdog_WindowWatchdogExt;
+
+pub use crate::pwm::PwmController1Ch as _stm32l1xx_hal_watchdog_PwmController1Ch;
+pub use crate::pwm::PwmController2Chs as _stm32l1xx_hal_watchdog_PwmController2Chs;
+pub use crate::pwm::PwmController3Chs as _stm32l1xx_hal_watchdog_PwmController3Chs;
+pub use crate::pwm::PwmController4Chs as _stm32l1xx_hal_watchdog_PwmController4Chs;
