@@ -16,30 +16,70 @@ use rt::entry;
 
 #[entry]
 fn main() -> ! {
-    let dp = stm32::Peripherals::take().unwrap();
+    let dph = stm32::Peripherals::take().unwrap();
 
     let mut rcc = dp.RCC.freeze(Config::hsi());
 
-    let gpioa = dp.GPIOA.split();
+    let mut gpioa = dph.GPIOA.split();
+    let mut gpiob = dph.GPIOB.split();
+    if true { /* Simple tuple */
+        let mut (pwm1, pwm2) = dph.TIM9.pwm(
+            (gpioa.pa2, gpioa.pa3), 10.khz(), &mut rcc);
 
-    let c1 = gpioa.pa0;
-    let mut pwm = dp.TIM5.pwm(c1, 10.khz(), &mut rcc);
+        do_pwm_test(&mut pwm1);
+        do_pwm_test(&mut pwm2);
+    } else { /* Simple */
+        let mut pwm1 = dph.TIM9.pwm(
+            (gpioa.pa2, gpioa.pa3), 10.khz(), &mut rcc);
 
-    let max = pwm.get_max_duty();
+        do_pwm_test(&mut pwm1);
+    }
+    /* CONTROLLER */ {
+        /* TIM2 (CH1, CH2) */ {
+            let mut tim2pwmc = dph.TIM2.pwm_controller(
+                (gpioa.pa0,gpioa.pa1), 10.khz(), &mut rcc);
 
-    pwm.enable();
+            do_pwm_test(tim2pwmc.pwm1());
+            do_pwm_test(tim2pwmc.pwm2());
 
-    pwm.set_duty(max);
-    asm::bkpt();
+            let (tim, (pa0, pa1)) = tim2pwmc.close(&mut rcc);
+            dph.TIM2 = tim; gpioa.pa0 = pa0; gpioa.pa1 = pa1;
+        }
+        /* TIM3 (CH1, CH3) */ {
+            let mut tim3pwmc = dph.TIM3.pwm_controller(
+                (gpioa.pa6, gpiob.pb0), 10.khz(), &mut rcc);
 
-    pwm.set_duty(max / 2);
-    asm::bkpt();
+            do_pwm_test(tim3pwmc.pwm1());
+            do_pwm_test(tim3pwmc.pwm2());
 
-    pwm.set_duty(max / 4);
-    asm::bkpt();
+            let (tim, (pa6, pb0)) = tim3pwmc.close(&mut rcc);
+            dph.TIM3 = tim; gpiob.pb0 = pb0; gpioa.pa6 = pa6;
+        }
+        /* TIM3 (CH2, CH4) */ {
+            let mut tim3pwmc = dph.TIM3.pwm_controller(
+                (gpioa.pa7, gpiob.pb1), 10.khz(), &mut rcc);
 
-    pwm.set_duty(max / 8);
-    asm::bkpt();
+            do_pwm_test(tim3pwmc.pwm1());
+            do_pwm_test(tim3pwmc.pwm2());
+
+            let (tim, (pa7, pb1)) = tim3pwmc.close(&mut rcc);
+            dph.TIM3 = tim; gpiob.pb1 = pb1; gpioa.pa7 = pa7;
+        }
+    };
+
+    fn do_pwm_test<T>(pwm: &mut T)
+        where T: hal::hal::PwmPin<Duty = u16>
+    {
+        let max = pwm.get_max_duty();
+        pwm.enable();
+        for i in 1..=4 {
+            pwm.set_duty(max * i*2/10);
+            for _j in 1..10 {
+                asm::nop();
+            }
+        }
+        pwm.disable();
+    }
 
     loop {}
 }

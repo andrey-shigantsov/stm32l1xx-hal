@@ -21,7 +21,7 @@ pub struct C2;
 pub struct C3;
 pub struct C4;
 
-pub trait Pins<TIM> {
+pub trait Pins<TIM, CHS> {
     type Channels;
     type PwmController;
     fn setup(&self);
@@ -29,24 +29,24 @@ pub trait Pins<TIM> {
 }
 
 pub trait PwmExt: Sized {
-    fn pwm<PINS, T>(self, _: PINS, frequency: T, rcc: &mut Rcc) -> PINS::Channels
+    fn pwm<PINS, CHS, T>(self, _: PINS, frequency: T, rcc: &mut Rcc) -> PINS::Channels
     where
-        PINS: Pins<Self>,
+        PINS: Pins<Self, CHS>,
         T: Into<Hertz>;
 
-    fn pwm_controller<PINS, CHS, T>(
+    fn pwm_controller<PINS, CHS, PWMS, T>(
         self,
         pins: PINS,
         freq: T,
         rcc: &mut Rcc,
     ) -> PINS::PwmController
     where
-        PINS: Pins<Self, Channels = CHS, PwmController = PwmController<Self, CHS, PINS>>,
+        PINS: Pins<Self, CHS, Channels = PWMS, PwmController = PwmController<Self, CHS, PWMS, PINS>>,
         T: Into<Hertz>;
 
-    fn pwm_reset<PINS>(&mut self, pins: &mut PINS, rcc: &mut Rcc)
+    fn pwm_reset<PINS, CHS>(&mut self, pins: &mut PINS, rcc: &mut Rcc)
     where
-        PINS: Pins<Self>;
+        PINS: Pins<Self, CHS>;
 }
 
 pub struct Pwm<TIM, CHANNEL> {
@@ -54,36 +54,17 @@ pub struct Pwm<TIM, CHANNEL> {
     _tim: PhantomData<TIM>,
 }
 
-pub struct PwmController<TIM, PWM_CHANNELS, PINS>
-    where PINS: Pins<TIM, Channels = PWM_CHANNELS>
+pub struct PwmController<TIM, CHS, PWMS, PINS>
+    where PINS: Pins<TIM, CHS, Channels = PWMS>
 {
     tim: TIM,
-    pwm: PWM_CHANNELS,
+    _chs: PhantomData<CHS>,
+    pwm: PWMS,
     pin: PINS,
 }
 
-pub trait PwmController1Ch<TIM, CH>
-{
-    fn pwm(&mut self) -> &mut Pwm<TIM, CH>;
-}
-pub trait PwmController2Chs<TIM, CH1, CH2> {
-    fn pwm1(&mut self) -> &mut Pwm<TIM, CH1>;
-    fn pwm2(&mut self) -> &mut Pwm<TIM, CH2>;
-}
-pub trait PwmController3Chs<TIM, CH1, CH2, CH3> {
-    fn pwm1(&mut self) -> &mut Pwm<TIM, CH1>;
-    fn pwm2(&mut self) -> &mut Pwm<TIM, CH2>;
-    fn pwm3(&mut self) -> &mut Pwm<TIM, CH3>;
-}
-pub trait PwmController4Chs<TIM, CH1, CH2, CH3, CH4> {
-    fn pwm1(&mut self) -> &mut Pwm<TIM, CH1>;
-    fn pwm2(&mut self) -> &mut Pwm<TIM, CH2>;
-    fn pwm3(&mut self) -> &mut Pwm<TIM, CH3>;
-    fn pwm4(&mut self) -> &mut Pwm<TIM, CH4>;
-}
-
-impl<TIM, PWMS, PINS> PwmController<TIM, PWMS, PINS>
-    where TIM: PwmExt, PINS: Pins<TIM, Channels = PWMS>, PWMS: PwmChannelsReset<PINS>
+impl<TIM, CHS, PWMS, PINS> PwmController<TIM, CHS, PWMS, PINS>
+    where TIM: PwmExt, PINS: Pins<TIM, CHS, Channels = PWMS>, PWMS: PwmChannelsReset<TIM,CHS,PINS>
 {
     pub fn close(mut self, rcc: &mut Rcc) -> (TIM, PINS) {
         self.pwm.reset();
@@ -93,58 +74,48 @@ impl<TIM, PWMS, PINS> PwmController<TIM, PWMS, PINS>
     }
 }
 
-pub trait PwmChannelsReset<PINS> {
+macro_rules! trait_pwm_ctrl_chs {
+    ( 1 ch ) => {
+        pub trait PwmController1Ch<TIM,CH> {
+            fn pwm(&mut self) -> &mut Pwm<TIM,CH>;
+        }
+    };
+    ( 2 ch ) => {
+        trait_pwm_ctrl_chs!(PwmController2Ch:
+            CH1, pwm1,
+            CH2, pwm2
+        );
+    };
+    ( 3 ch ) => {
+        trait_pwm_ctrl_chs!(PwmController3Ch:
+            CH1, pwm1,
+            CH2, pwm2,
+            CH3, pwm3
+        );
+    };
+    ( 4 ch ) => {
+        trait_pwm_ctrl_chs!(PwmController4Ch:
+            CH1, pwm1,
+            CH2, pwm2,
+            CH3, pwm3,
+            CH4, pwm4
+        );
+    };
+    ( $nChsTraitName:ident: $($CH:tt, $pwm:ident),+ ) => {
+        pub trait $nChsTraitName<TIM, $($CH),+> {$(
+            fn $pwm(&mut self) -> &mut Pwm<TIM,$CH>;
+        )+}
+    }
+}
+trait_pwm_ctrl_chs!( 1 ch );
+trait_pwm_ctrl_chs!( 2 ch );
+trait_pwm_ctrl_chs!( 3 ch );
+trait_pwm_ctrl_chs!( 4 ch );
+
+pub trait PwmChannelsReset<TIM, CHS, PINS>
+    where PINS: Pins<TIM,CHS>
+{
     fn reset(&mut self);
-}
-
-impl<TIM, PIN, CH> PwmController1Ch<TIM, CH> for PwmController<TIM, Pwm<TIM, CH>, PIN>
-    where PIN: Pins<TIM, Channels = Pwm<TIM, CH>>
-{
-    fn pwm(&mut self) -> &mut Pwm<TIM, CH> {
-        &mut self.pwm
-    }
-}
-
-impl<TIM, PIN, CH1, CH2> PwmController2Chs<TIM, CH1, CH2> for PwmController<TIM, (Pwm<TIM, CH1>, Pwm<TIM, CH2>), PIN>
-    where PIN: Pins<TIM, Channels = (Pwm<TIM, CH1>,Pwm<TIM, CH2>)>
-{
-    fn pwm1(&mut self) -> &mut Pwm<TIM, CH1> {
-        &mut self.pwm.0
-    }
-    fn pwm2(&mut self) -> &mut Pwm<TIM, CH2> {
-        &mut self.pwm.1
-    }
-}
-
-impl<TIM, PIN, CH1, CH2, CH3> PwmController3Chs<TIM, CH1, CH2, CH3> for PwmController<TIM, (Pwm<TIM, CH1>, Pwm<TIM, CH2>, Pwm<TIM, CH3>), PIN>
-    where PIN: Pins<TIM, Channels = (Pwm<TIM, CH1>, Pwm<TIM, CH2>, Pwm<TIM, CH3>)>
-{
-    fn pwm1(&mut self) -> &mut Pwm<TIM, CH1> {
-        &mut self.pwm.0
-    }
-    fn pwm2(&mut self) -> &mut Pwm<TIM, CH2> {
-        &mut self.pwm.1
-    }
-    fn pwm3(&mut self) -> &mut Pwm<TIM, CH3> {
-        &mut self.pwm.2
-    }
-}
-
-impl<TIM, PIN, CH1, CH2, CH3, CH4> PwmController4Chs<TIM, CH1, CH2, CH3, CH4> for PwmController<TIM, (Pwm<TIM, CH1>, Pwm<TIM, CH2>, Pwm<TIM, CH3>, Pwm<TIM, CH4>), PIN>
-    where PIN: Pins<TIM, Channels = (Pwm<TIM, CH1>, Pwm<TIM, CH2>, Pwm<TIM, CH3>, Pwm<TIM, CH4>)>
-{
-    fn pwm1(&mut self) -> &mut Pwm<TIM, CH1> {
-        &mut self.pwm.0
-    }
-    fn pwm2(&mut self) -> &mut Pwm<TIM, CH2> {
-        &mut self.pwm.1
-    }
-    fn pwm3(&mut self) -> &mut Pwm<TIM, CH3> {
-        &mut self.pwm.2
-    }
-    fn pwm4(&mut self) -> &mut Pwm<TIM, CH4> {
-        &mut self.pwm.3
-    }
 }
 
 macro_rules! impl_pwm_pin {
@@ -344,69 +315,11 @@ macro_rules! impl_pwm_pin {
 }
 
 macro_rules! impl_pins {
-     ($TIMX:ident, $af:expr, ($CX:ident: $pinx:ty, $CY:ident: $piny:ty)) => {
-        impl Pins<$TIMX> for ($pinx, $piny) {
-            type Channels = (
-                Pwm<$TIMX, $CX>,
-                Pwm<$TIMX, $CY>
-            );
-            type PwmController = PwmController<$TIMX, (Pwm<$TIMX, $CX>, Pwm<$TIMX, $CY>), ($pinx, $piny)>;
-
-            fn setup(&self) {
-                self.0.set_alt_mode($af);
-                self.1.set_alt_mode($af);
-            }
-
-            fn reset(&self) {
-                self.0.set_alt_mode(AltMode::SYSTEM);
-                self.1.set_alt_mode(AltMode::SYSTEM);
-            }
-        }
-        impl PwmChannelsReset<($pinx, $piny)> for (Pwm<$TIMX, $CX>, Pwm<$TIMX, $CY>)
-        {
-            fn reset(&mut self) {
-                self.0.disable();
-                self.1.disable();
-            }
-        }
-
-    };
-    ($TIMX:ident, $af:expr, ($CX:ident: $pinx:ty, $CY:ident: $piny:ty, $CZ:ident: $pinz:ty)) => {
-        impl Pins<$TIMX> for ($pinx, $piny, $pinz) {
-            type Channels = (
-                Pwm<$TIMX, $CX>,
-                Pwm<$TIMX, $CY>,
-                Pwm<$TIMX, $CZ>,
-            );
-            type PwmController = PwmController<$TIMX, (Pwm<$TIMX, $CX>, Pwm<$TIMX, $CY>, , Pwm<$TIMX, $CZ>), ($pinx, $piny, $pinz)>;
-
-            fn setup(&self) {
-                self.0.set_alt_mode($af);
-                self.1.set_alt_mode($af);
-                self.2.set_alt_mode($af);
-            }
-
-            fn reset(&self) {
-                self.0.set_alt_mode(AltMode::SYSTEM);
-                self.1.set_alt_mode(AltMode::SYSTEM);
-                self.2.set_alt_mode(AltMode::SYSTEM);
-            }
-        }
-        impl PwmChannelsReset<($pinx, $piny, $pinz)> for (Pwm<$TIMX, $CX>, Pwm<$TIMX, $CY>, Pwm<$TIMX, $CZ>)
-        {
-            fn reset(&mut self) {
-                self.0.disable();
-                self.1.disable();
-                self.2.disable();
-            }
-        }
-
-    };
     ($TIMX:ident, $af:expr, $($c:ident, $pin:ty),+) => {
         $(
-            impl Pins<$TIMX> for $pin {
+            impl Pins<$TIMX, $c> for $pin {
                 type Channels = Pwm<$TIMX, $c>;
-                type PwmController = PwmController<$TIMX, Pwm<$TIMX, $c>, $pin>;
+                type PwmController = PwmController<$TIMX, $c, Pwm<$TIMX, $c>, $pin>;
 
                 fn setup(&self) {
                     self.set_alt_mode($af);
@@ -415,7 +328,7 @@ macro_rules! impl_pins {
                     self.set_alt_mode(AltMode::SYSTEM);
                 }
             }
-            impl PwmChannelsReset<$pin> for Pwm<$TIMX, $c>
+            impl PwmChannelsReset<$TIMX, $c, $pin> for Pwm<$TIMX, $c>
             {
                 fn reset(&mut self) {
                     self.disable();
@@ -425,66 +338,142 @@ macro_rules! impl_pins {
     };
 }
 
-macro_rules! channels {
-    ($TIMX:ident, $af:expr, $($c:ident, $pin:ty),+) => {
-        impl_pins!($TIMX, $af, $($c, $pin),+);
+macro_rules! impl_traits_for_tuples {
+    ( 2 ch $TIM:ident ) => {
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C2, PIN2);
     };
-    ($TIMX:ident, $af:expr, $c1:ty) => {
-        impl_pins!($TIMX, $af, C1, $c1);
-        impl_pwm_pin!($TIMX, C1);
+    ( 3 ch $TIM:ident ) => {
+        impl_traits_for_tuples!( 2 ch $TIM );
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C3, PIN2);
+        impl_traits_for_tuples!($TIM: 0, C2, PIN1, 1, C3, PIN2);
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C2, PIN2, 2, C3, PIN3 );
     };
-    ($TIMX:ident, $af:expr, $c1:ty, $c2:ty) => {
-        channels!($TIMX, $af, $c1);
-
-        impl_pins!($TIMX, $af, C2, $c2);
-        impl_pins!($TIMX, $af, (C1: $c1, C2: $c2));
-
-        impl_pwm_pin!($TIMX, C2);
+    ( 4 ch $TIM:ident ) => {
+        impl_traits_for_tuples!( 3 ch $TIM );
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C4, PIN2);
+        impl_traits_for_tuples!($TIM: 0, C2, PIN1, 1, C4, PIN2);
+        impl_traits_for_tuples!($TIM: 0, C3, PIN1, 1, C4, PIN2);
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C2, PIN2, 2, C4, PIN3 );
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C3, PIN2, 2, C4, PIN3 );
+        impl_traits_for_tuples!($TIM: 0, C2, PIN1, 1, C3, PIN2, 2, C4, PIN3 );
+        impl_traits_for_tuples!($TIM: 0, C1, PIN1, 1, C2, PIN2, 2, C3, PIN3, 3, C4, PIN4 );
     };
-    ($TIMX:ident, $af:expr, $c1:ty, $c2:ty, $c3:ty, $c4:ty) => {
-        channels!($TIMX, $af, $c1, $c2);
-
-        impl_pins!($TIMX, $af, C3, $c3, C4, $c4);
-        impl_pins!($TIMX, $af, (C1: $c1, C3: $c3));
-        impl_pins!($TIMX, $af, (C1: $c1, C4: $c4));
-        impl_pins!($TIMX, $af, (C2: $c2, C3: $c3));
-        impl_pins!($TIMX, $af, (C2: $c2, C4: $c4));
-        impl_pins!($TIMX, $af, (C3: $c3, C4: $c4));
-        impl Pins<$TIMX> for ($c1, $c2, $c3, $c4) {
-            type Channels = (
-                Pwm<$TIMX, C1>,
-                Pwm<$TIMX, C2>,
-                Pwm<$TIMX, C3>,
-                Pwm<$TIMX, C4>,
-            );
-            type PwmController = PwmController<$TIMX, (Pwm<$TIMX, C1>, Pwm<$TIMX, C2>, Pwm<$TIMX, C3>, Pwm<$TIMX, C4>), ($c1, $c2, $c3, $c4)>;
+    ( $TIM:ident: $($i:tt, $CH:ident, $PIN:tt),+ ) => {
+        impl<$($PIN),+> Pins<$TIM, ($($CH),+)> for ($($PIN),+)
+            where $($PIN: Pins<$TIM, $CH>),+
+        {
+            type Channels = ($(Pwm<$TIM,$CH>,)+);
+            type PwmController = PwmController<$TIM, ($($CH),+), Self::Channels, ($($PIN),+)>;
 
             fn setup(&self) {
-                self.0.set_alt_mode($af);
-                self.1.set_alt_mode($af);
-                self.2.set_alt_mode($af);
-                self.3.set_alt_mode($af);
+                $(
+                    self.$i.setup();
+                )+
             }
 
             fn reset(&self) {
-                self.0.set_alt_mode(AltMode::SYSTEM);
-                self.1.set_alt_mode(AltMode::SYSTEM);
-                self.2.set_alt_mode(AltMode::SYSTEM);
-                self.3.set_alt_mode(AltMode::SYSTEM);
+                $(
+                    self.$i.reset();
+                )+
             }
         }
-        impl PwmChannelsReset<($c1, $c2, $c3, $c4)> for (Pwm<$TIMX, C1>, Pwm<$TIMX, C2>, Pwm<$TIMX, C3>, Pwm<$TIMX, C4>)
+        impl<$($PIN),+> PwmChannelsReset<$TIM, ($($CH),+), ($($PIN),+)>
+            for ($(Pwm<$TIM,$CH>),+)
+            where $($PIN: Pins<$TIM, $CH>),+
         {
             fn reset(&mut self) {
-                self.0.disable();
-                self.1.disable();
-                self.2.disable();
-                self.3.disable();
+                $(
+                    self.$i.disable();
+                )+
             }
         }
+    };
+}
+macro_rules! impl_pwm_ctrl_chs {
+    ( 1 ch $TIM:ident ) => {
+        impl<PINS,CH> PwmController1Ch<$TIM, CH>
+            for PwmController<$TIM, CH, Pwm<$TIM,CH>, PINS>
+            where PINS: Pins<$TIM, CH, Channels = Pwm<$TIM,CH>>
+        {
+            fn pwm(&mut self) -> &mut Pwm<$TIM,CH> {
+                &mut self.pwm
+            }
+        }
+    };
+    ( 2 ch $TIM:ident ) => {
+        impl_pwm_ctrl_chs!( 1 ch $TIM );
+        impl_pwm_ctrl_chs!(PwmController2Ch for $TIM:
+            pwm1, CH1, 0, pwm2, CH2, 1);
+    };
+    ( 3 ch $TIM:ident ) => {
+        impl_pwm_ctrl_chs!( 2 ch $TIM );
+        impl_pwm_ctrl_chs!(PwmController3Ch for $TIM:
+            pwm1, CH1, 0, pwm2, CH2, 1, pwm3, CH3, 2);
+    };
+    ( 4 ch $TIM:ident ) => {
+        impl_pwm_ctrl_chs!( 3 ch $TIM );
+        impl_pwm_ctrl_chs!(PwmController4Ch for $TIM:
+            pwm1, CH1, 0, pwm2, CH2, 1, pwm3, CH3, 2, pwm4, CH4, 3);
+    };
+    ( $nChsTraitName:ident for $TIM:ident: $($pwm:ident, $CH:tt, $i:tt),+ ) => {
+        impl<PINS, $($CH),+> $nChsTraitName<$TIM,$($CH),+>
+            for PwmController<$TIM, ($($CH),+), ($(Pwm<$TIM,$CH>),+), PINS>
+            where PINS: Pins<$TIM, ($($CH),+), Channels = ($(Pwm<$TIM,$CH>),+)>
+        {$(
+            fn $pwm(&mut self) -> &mut Pwm<$TIM, $CH> {
+                &mut self.pwm.$i
+            }
+        )+}
+    };
+}
 
+macro_rules! tim_af{
+    ( TIM2 ) => { AltMode::TIM2 };
+    ( TIM3 ) => { AltMode::TIM3_5 };
+    ( TIM4 ) => { AltMode::TIM3_5 };
+    ( TIM5 ) => { AltMode::TIM3_5 };
+    ( TIM9 ) => { AltMode::TIM9_11 };
+    ( TIM10 ) => { AltMode::TIM9_11 };
+    ( TIM11 ) => { AltMode::TIM9_11 };
+}
+
+macro_rules! channels {
+    ($TIMX:ident, ) => {};
+    (init $TIMX:ident: ($c1:ty, $c2:ty, $c3:ty, $c4:ty); $($tail:tt)*) => {
+        impl_pins!($TIMX, tim_af!($TIMX), C1, $c1, C2, $c2, C3, $c3, C4, $c4);
+
+        impl_pwm_pin!($TIMX, C1);
+        impl_pwm_pin!($TIMX, C2);
         impl_pwm_pin!($TIMX, C3);
         impl_pwm_pin!($TIMX, C4);
+
+        channels!($TIMX, $($tail)*);
+
+        impl_pwm_ctrl_chs!( 4 ch $TIMX );
+        impl_traits_for_tuples!( 4 ch $TIMX);
+    };
+    (init $TIMX:ident: ($c1:ty, $c2:ty); $($tail:tt)*) => {
+        impl_pins!($TIMX, tim_af!($TIMX), C1, $c1, C2, $c2);
+
+        impl_pwm_pin!($TIMX, C1);
+        impl_pwm_pin!($TIMX, C2);
+
+        channels!($TIMX, $($tail)*);
+
+        impl_pwm_ctrl_chs!( 2 ch $TIMX );
+        impl_traits_for_tuples!( 2 ch $TIMX );
+    };
+    (init $TIMX:ident:($c1:ty); $($tail:tt)*) => {
+        impl_pins!($TIMX, tim_af!($TIMX), C1, $c1);
+
+        impl_pwm_pin!($TIMX, C1);
+
+        channels!($TIMX, $($tail)*);
+
+        impl_pwm_ctrl_chs!( 1 ch $TIMX );
+    };
+    ($TIMX:ident, $($c:ident, $pin:ty),+) => {
+        impl_pins!($TIMX, tim_af!($TIMX), $($c, $pin),+);
     };
 }
 
@@ -492,37 +481,37 @@ macro_rules! timers {
     ($($TIMX:ident: ($apb_clk:ident, $apbXenr:ident, $apbXrstr:ident, $timX:ident, $timXen:ident, $timXrst:ident),)+) => {
         $(
             impl PwmExt for $TIMX {
-                fn pwm<PINS, T>(
+                fn pwm<PINS, CHS, T>(
                     self,
                     pins: PINS,
                     freq: T,
                     rcc: &mut Rcc,
                 ) -> PINS::Channels
                 where
-                    PINS: Pins<Self>,
+                    PINS: Pins<Self, CHS>,
                     T: Into<Hertz>,
                 {
                     let (_tim, pwm, _pins) = $timX(self, pins, freq.into(), rcc);
                     pwm
                 }
-                fn pwm_controller<PINS, CHS, T>(
+                fn pwm_controller<PINS, CHS, PWMS, T>(
                     self,
                     pins: PINS,
                     freq: T,
                     rcc: &mut Rcc,
                 ) -> PINS::PwmController
                 where
-                    PINS: Pins<Self, Channels = CHS, PwmController = PwmController<Self, CHS, PINS>>,
+                    PINS: Pins<Self, CHS, Channels = PWMS, PwmController = PwmController<Self, CHS, PWMS, PINS>>,
                     T: Into<Hertz>,
                 {
                     let (tim, pwm, pin) = $timX(self, pins, freq.into(), rcc);
-                    let pwm_ctrl = PwmController { tim, pwm, pin };
+                    let pwm_ctrl = PwmController { tim, pwm, pin, _chs: PhantomData {} };
                     pwm_ctrl
                 }
 
-                fn pwm_reset<PINS>(&mut self, pins: &mut PINS, rcc: &mut Rcc)
+                fn pwm_reset<PINS,CHS>(&mut self, pins: &mut PINS, rcc: &mut Rcc)
                 where
-                    PINS: Pins<Self>,
+                    PINS: Pins<Self,CHS>,
                 {
                     self.psc.write(|w| w.psc().bits(0) );
                     #[allow(unused_unsafe)]
@@ -536,14 +525,14 @@ macro_rules! timers {
                 }
             }
 
-            fn $timX<PINS>(
+            fn $timX<PINS, CHS>(
                 tim: $TIMX,
                 pins: PINS,
                 freq: Hertz,
                 rcc: &mut Rcc,
             ) -> ($TIMX, PINS::Channels, PINS)
             where
-                PINS: Pins<$TIMX>,
+                PINS: Pins<$TIMX, CHS>,
             {
                 pins.setup();
                 rcc.rb.$apbXenr.modify(|_, w| w.$timXen().set_bit());
@@ -566,15 +555,13 @@ macro_rules! timers {
     }
 }
 
-channels!(
-    TIM2,
-    AltMode::TIM2,
-    PA0<Input<Floating>>,
-    PA1<Input<Floating>>,
-    PA2<Input<Floating>>,
-    PA3<Input<Floating>>
-);
-channels!(TIM2, AltMode::TIM2,
+channels!(init TIM2: (
+        PA0<Input<Floating>>,
+        PA1<Input<Floating>>,
+        PA2<Input<Floating>>,
+        PA3<Input<Floating>>
+    );
+
     C1, PA5<Input<Floating>>,
 
     C3, PB10<Input<Floating>>,
@@ -585,22 +572,20 @@ channels!(TIM2, AltMode::TIM2,
     C2, PB3<Input<Floating>>
 );
 #[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
-channels!(TIM2, AltMode::TIM2,
+channels!(TIM2,
     C1, PE9<Input<Floating>>,
     C2, PE10<Input<Floating>>,
     C3, PE11<Input<Floating>>,
     C4, PE12<Input<Floating>>
 );
 
-channels!(
-    TIM3,
-    AltMode::TIM3_5,
-    PA6<Input<Floating>>,
-    PA7<Input<Floating>>,
-    PB0<Input<Floating>>,
-    PB1<Input<Floating>>
-);
-channels!(TIM3, AltMode::TIM3_5,
+channels!(init TIM3: (
+        PA6<Input<Floating>>,
+        PA7<Input<Floating>>,
+        PB0<Input<Floating>>,
+        PB1<Input<Floating>>
+    );
+
     C1, PC6<Input<Floating>>,
     C2, PC7<Input<Floating>>,
     C3, PC8<Input<Floating>>,
@@ -610,49 +595,43 @@ channels!(TIM3, AltMode::TIM3_5,
     C2, PB5<Input<Floating>>
 );
 #[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
-channels!(TIM3, AltMode::TIM3_5,
+channels!(TIM3,
     C1, PE3<Input<Floating>>,
     C2, PE4<Input<Floating>>
 );
 
-channels!(
-    TIM4,
-    AltMode::TIM3_5,
-    PB6<Input<Floating>>,
-    PB7<Input<Floating>>,
-    PB8<Input<Floating>>,
-    PB9<Input<Floating>>
-);
-channels!(TIM4, AltMode::TIM3_5,
+channels!(init TIM4: (
+        PB6<Input<Floating>>,
+        PB7<Input<Floating>>,
+        PB8<Input<Floating>>,
+        PB9<Input<Floating>>
+    );
+
     C1, PD12<Input<Floating>>,
     C2, PD13<Input<Floating>>,
     C3, PD14<Input<Floating>>,
     C4, PD15<Input<Floating>>
 );
 
-channels!(
-    TIM5,
-    AltMode::TIM3_5,
+channels!(init TIM5: (
     PA0<Input<Floating>>,
     PA1<Input<Floating>>,
     PA2<Input<Floating>>,
     PA3<Input<Floating>>
-);
+););
 #[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
-channels!(TIM5, AltMode::TIM3_5,
+channels!(TIM5,
     C1, PF6<Input<Floating>>,
     C2, PF7<Input<Floating>>,
     C3, PF8<Input<Floating>>,
     C4, PF9<Input<Floating>>
 );
 
-channels!(
-    TIM9,
-    AltMode::TIM9_11,
-    PA2<Input<Floating>>,
-    PA3<Input<Floating>>
-);
-channels!(TIM9,AltMode::TIM9_11,
+channels!(init TIM9: (
+        PA2<Input<Floating>>,
+        PA3<Input<Floating>>
+    );
+
     C1, PB13<Input<Floating>>,
     C2, PB14<Input<Floating>>,
 
@@ -661,28 +640,32 @@ channels!(TIM9,AltMode::TIM9_11,
     C2, PD7<Input<Floating>>
 );
 #[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
-channels!(TIM9,AltMode::TIM9_11,
+channels!(TIM9,
     C1, PE5<Input<Floating>>,
     C2, PE6<Input<Floating>>
 );
 
-channels!(TIM10, AltMode::TIM9_11, PA6<Input<Floating>>);
-channels!(TIM10, AltMode::TIM9_11,
+channels!(init TIM10: (
+        PA6<Input<Floating>>
+    );
+
     C1, PB8<Input<Floating>>,
     C1, PB12<Input<Floating>>
 );
 #[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
-channels!(TIM10, AltMode::TIM9_11,
+channels!(TIM10,
     C1, PE0<Input<Floating>>
 );
 
-channels!(TIM11, AltMode::TIM9_11, PA7<Input<Floating>>);
-channels!(TIM11, AltMode::TIM9_11,
+channels!(init TIM11: (
+        PA7<Input<Floating>>
+    );
+
     C1, PB9<Input<Floating>>,
     C1, PB15<Input<Floating>>
 );
 #[cfg(any(feature = "stm32l151", feature = "stm32l152", feature = "stm32l162"))]
-channels!(TIM11, AltMode::TIM9_11,
+channels!(TIM11,
     C1, PE1<Input<Floating>>
 );
 
