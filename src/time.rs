@@ -1,12 +1,12 @@
 use cortex_m::peripheral::DWT;
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub struct Bps(pub u32);
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub struct Hertz(pub u32);
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub struct MicroSeconds(pub u32);
 
 /// Extension trait that adds convenience methods to the `u32` type
@@ -123,14 +123,38 @@ impl MonoTimerExt for DWT {
 }
 
 /// A measurement of a monotonically nondecreasing clock
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Instant {
-    now: u32,
+    pub now: u32,
 }
 
 impl Instant {
     /// Ticks elapsed since the `Instant` was created
     pub fn elapsed(&self) -> u32 {
         DWT::get_cycle_count().wrapping_sub(self.now)
+    }
+}
+
+impl core::ops::Add for Instant {
+    type Output = Instant;
+
+    fn add(self, other: Instant) -> Instant {
+        Instant { now: self.now + other.now }
+    }
+}
+
+impl core::ops::Sub for Instant {
+    type Output = Instant;
+
+    fn sub(self, other: Instant) -> Instant {
+        Instant { now: self.now - other.now }
+    }
+}
+
+impl core::convert::TryInto<u32> for Instant {
+    type Error = ();
+
+    fn try_into(self) -> Result<u32, Self::Error> {
+        Ok(self.now)
     }
 }
