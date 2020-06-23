@@ -134,27 +134,3 @@ impl Instant {
         DWT::get_cycle_count().wrapping_sub(self.now)
     }
 }
-
-impl core::ops::Add for Instant {
-    type Output = Instant;
-
-    fn add(self, other: Instant) -> Instant {
-        Instant { now: self.now + other.now }
-    }
-}
-
-impl core::ops::Sub for Instant {
-    type Output = Instant;
-
-    fn sub(self, other: Instant) -> Instant {
-        Instant { now: self.now - other.now }
-    }
-}
-
-impl core::convert::TryInto<u32> for Instant {
-    type Error = ();
-
-    fn try_into(self) -> Result<u32, Self::Error> {
-        Ok(self.now)
-    }
-}
