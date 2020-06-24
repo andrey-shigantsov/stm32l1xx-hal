@@ -1,5 +1,9 @@
 pub use hal::prelude::*;
 
+pub use hal::digital::v2::InputPin as _hal_gpio_InputPin;
+pub use hal::digital::v2::OutputPin as _hal_gpio_OutputPin;
+pub use hal::digital::v2::StatefulOutputPin as _hal_gpio_StatefulOutputPin;
+pub use hal::digital::v2::ToggleableOutputPin as _hal_gpio_ToggleableOutputPin;
 pub use hal::adc::OneShot as _hal_adc_OneShot;
 pub use hal::watchdog::Watchdog as _hal_watchdog_Watchdog;
 pub use hal::watchdog::WatchdogEnable as _hal_watchdog_WatchdogEnable;
