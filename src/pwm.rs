@@ -66,7 +66,7 @@ pub struct PwmController<TIM, CHS, PWMS, PINS>
 impl<TIM, CHS, PWMS, PINS> PwmController<TIM, CHS, PWMS, PINS>
     where TIM: PwmExt, PINS: Pins<TIM, CHS, Channels = PWMS>, PWMS: PwmChannelsReset<TIM,CHS,PINS>
 {
-    pub fn close(mut self, rcc: &mut Rcc) -> (TIM, PINS) {
+    pub fn release(mut self, rcc: &mut Rcc) -> (TIM, PINS) {
         self.pwm.reset();
         self.tim.pwm_reset(&mut self.pin, rcc);
 
