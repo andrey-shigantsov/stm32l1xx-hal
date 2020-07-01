@@ -32,10 +32,13 @@ macro_rules! i2c_pins {
 i2c_pins!(I2C1: (PB6,PB7), (PB8,PB9) );
 i2c_pins!(I2C2: (PB10,PB11) );
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Error {
     OVERRUN,
     NACK,
+    TIMEOUT,
+    BUS,
+    ARBTRN_LOST,
 }
 
 macro_rules! i2c {
@@ -126,30 +129,53 @@ macro_rules! i2c {
                 (self.i2c, self.pins)
             }
 
+            fn sr1_read(&self) -> Result<crate::stm32::i2c1::sr1::R, Error> {
+                let sr1 = self.i2c.sr1.read();
+
+                if sr1.af().bit_is_set() {
+                    return Err(Error::NACK);
+                }
+                if sr1.ovr().bit_is_set() {
+                    return Err(Error::OVERRUN);
+                }
+                if sr1.arlo().bit_is_set() {
+                    return Err(Error::ARBTRN_LOST);
+                }
+                if sr1.berr().bit_is_set() {
+                    return Err(Error::BUS);
+                }
+                if sr1.timeout().bit_is_set() {
+                    return Err(Error::TIMEOUT);
+                }
+
+                Ok(sr1)
+            }
+
+            fn sr1_wait<F>(&self, fx: F) -> Result<(), Error>
+                where F: Fn(crate::stm32::i2c1::sr1::R) -> bool
+            {
+                while {
+                    let sr1 = self.sr1_read()?;
+                    fx(sr1)
+                } {};
+                Ok(())
+            }
+
             fn send_byte(&self, byte: u8) -> Result<(), Error> {
                 // Wait until we're ready for sending
-                while self.i2c.sr1.read().tx_e().bit_is_clear() {}
+                self.sr1_wait(|sr1| sr1.tx_e().bit_is_clear())?;
 
                 // Push out a byte of data
                 self.i2c.dr.write(|w| unsafe { w.bits(u32::from(byte)) });
 
                 // While until byte is transferred
-                while {
-                    let sr1 = self.i2c.sr1.read();
-
-                    // If we received a NACK, then this is an error
-                    if sr1.af().bit_is_set() {
-                        return Err(Error::NACK);
-                    }
-
-                    sr1.btf().bit_is_clear()
-                } {}
+                self.sr1_wait(|sr1| sr1.btf().bit_is_clear())?;
 
                 Ok(())
             }
 
             fn recv_byte(&self) -> Result<u8, Error> {
-                while self.i2c.sr1.read().rx_ne().bit_is_clear() {}
+                self.sr1_wait(|sr1| sr1.rx_ne().bit_is_clear())?;
                 let value = self.i2c.dr.read().bits() as u8;
                 Ok(value)
             }
@@ -179,10 +205,7 @@ macro_rules! i2c {
                 self.i2c.cr1.modify(|_, w| w.start().set_bit());
 
                 // Wait until START condition was generated
-                while {
-                    let sr1 = self.i2c.sr1.read();
-                    sr1.sb().bit_is_clear()
-                } {}
+                self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
 
                 // Also wait until signalled we're master and everything is waiting for us
                 while {
@@ -196,10 +219,7 @@ macro_rules! i2c {
                     .write(|w| unsafe { w.bits(u32::from(addr) << 1) });
 
                 // Wait until address was sent
-                while {
-                    let sr1 = self.i2c.sr1.read();
-                    sr1.addr().bit_is_clear()
-                } {}
+                self.sr1_wait(|sr1| sr1.addr().bit_is_clear())?;
 
                 // Clear condition by reading SR2
                 self.i2c.sr2.read();
@@ -224,10 +244,7 @@ macro_rules! i2c {
                     .modify(|_, w| w.start().set_bit().ack().set_bit());
 
                 // Wait until START condition was generated
-                while {
-                    let sr1 = self.i2c.sr1.read();
-                    sr1.sb().bit_is_clear()
-                } {}
+                self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
 
                 // Also wait until signalled we're master and everything is waiting for us
                 while {
@@ -241,10 +258,7 @@ macro_rules! i2c {
                     .write(|w| unsafe { w.bits((u32::from(addr) << 1) + 1) });
 
                 // Wait until address was sent
-                while {
-                    let sr1 = self.i2c.sr1.read();
-                    sr1.addr().bit_is_clear()
-                } {}
+                self.sr1_wait(|sr1| sr1.addr().bit_is_clear())?;
 
                 // Clear condition by reading SR2
                 self.i2c.sr2.read();
