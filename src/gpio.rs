@@ -8,7 +8,7 @@ pub trait GpioExt {
     type Parts;
 
     /// Splits the GPIO block into independent pins and registers
-    fn split(self) -> Self::Parts;
+    fn split(self, rcc: &mut crate::rcc::Rcc) -> Self::Parts;
 }
 
 /// Input mode (type state)
@@ -76,7 +76,7 @@ macro_rules! gpio {
 
             use hal::digital::v2::{toggleable, InputPin, OutputPin, StatefulOutputPin};
             use crate::stm32::$GPIOX;
-            use crate::stm32::RCC;
+            use crate::rcc::Rcc;
             use super::{
                 Floating, GpioExt, Input, OpenDrain, Output, Speed,
                 PullDown, PullUp, PushPull, AltMode, Analog
@@ -93,11 +93,8 @@ macro_rules! gpio {
             impl GpioExt for $GPIOX {
                 type Parts = Parts;
 
-                fn split(self) -> Parts {
-                    // NOTE(unsafe) This executes only during initialisation
-                    let rcc = unsafe { &(*RCC::ptr()) };
-                    rcc.ahbenr.modify(|_, w| w.$iopxenr().set_bit());
-
+                fn split(self, rcc: &mut crate::rcc::Rcc) -> Parts {
+                    rcc.rb.ahbenr.modify(|_, w| w.$iopxenr().set_bit());
                     Parts {
                         $(
                             $pxi: $PXi { _mode: PhantomData },

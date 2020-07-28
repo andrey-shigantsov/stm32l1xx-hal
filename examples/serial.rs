@@ -23,7 +23,7 @@ fn main() -> ! {
 
     let mut rcc = dp.RCC.freeze(Config::hsi());
 
-    let gpiob = dp.GPIOB.split();
+    let gpiob = dp.GPIOB.split(&mut rcc);
     let tx = gpiob.pb10;
     let rx = gpiob.pb11;
 

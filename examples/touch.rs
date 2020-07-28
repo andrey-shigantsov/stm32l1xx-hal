@@ -17,7 +17,7 @@ use rt::entry;
 fn main() -> ! {
     let dp = stm32::Peripherals::take().unwrap();
     let mut rcc = dp.RCC.freeze(Config::hsi());
-    let gpiob = dp.GPIOB.split();
+    let gpiob = dp.GPIOB.split(&mut rcc);
 
     let mut sample = gpiob.pb4;
     let mut c1 = gpiob.pb5;

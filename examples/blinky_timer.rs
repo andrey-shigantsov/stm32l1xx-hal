@@ -21,7 +21,7 @@ fn main() -> ! {
 
     let mut rcc = dp.RCC.freeze(Config::hsi());
 
-    let gpiob = dp.GPIOB.split();
+    let gpiob = dp.GPIOB.split(&mut rcc);
     let mut led = gpiob.pb6.into_push_pull_output();
 
     let mut timer = dp.TIM2.timer(2.hz(), &mut rcc);

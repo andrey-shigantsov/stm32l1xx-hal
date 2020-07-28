@@ -18,8 +18,8 @@ fn main() -> ! {
     let dp = stm32::Peripherals::take().unwrap();
 
     let mut rcc = dp.RCC.freeze(Config::hsi());
-    let gpioa = dp.GPIOA.split();
-    let gpiob = dp.GPIOB.split();
+    let gpioa = dp.GPIOA.split(&mut rcc);
+    let gpiob = dp.GPIOB.split(&mut rcc);
 
     let mut adc_pin = gpioa.pa1.into_analog();
     let mut adc = dp.ADC.adc(&mut rcc);

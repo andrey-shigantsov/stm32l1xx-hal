@@ -21,7 +21,7 @@ fn main() -> ! {
 
     let mut rcc = dp.RCC.freeze(Config::hsi());
 
-    let gpiob = dp.GPIOB.split();
+    let gpiob = dp.GPIOB.split(&mut rcc);
 
     let scl = gpiob.pb10.into_open_drain_output();
     let sda = gpiob.pb11.into_open_drain_output();

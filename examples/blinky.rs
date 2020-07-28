@@ -15,7 +15,7 @@ use rt::entry;
 #[entry]
 fn main() -> ! {
     let dp = stm32::Peripherals::take().unwrap();
-    let gpiob = dp.GPIOB.split();
+    let gpiob = dp.GPIOB.split(&mut rcc);
     let mut led = gpiob.pb7.into_push_pull_output();
 
     loop {

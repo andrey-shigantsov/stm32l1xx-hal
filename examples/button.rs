@@ -21,10 +21,10 @@ fn main() -> ! {
     let rcc = dp.RCC.freeze(Config::hsi());
     let mut delay = cp.SYST.delay(rcc.clocks);
 
-    let gpioa = dp.GPIOA.split();
+    let gpioa = dp.GPIOA.split(&mut rcc);
     let button = gpioa.pa0.into_pull_up_input();
 
-    let gpiob = dp.GPIOB.split();
+    let gpiob = dp.GPIOB.split(&mut rcc);
     let mut led = gpiob.pb6.into_push_pull_output();
 
     loop {

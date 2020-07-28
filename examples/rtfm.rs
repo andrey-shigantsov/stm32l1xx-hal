@@ -33,7 +33,7 @@ const APP: () = {
     fn init() {
         let mut rcc = device.RCC.freeze(Config::hsi());
 
-        let gpiob = device.GPIOB.split();
+        let gpiob = device.GPIOB.split(&mut rcc);
         let mut timer = device.TIM2.timer(1.hz(), &mut rcc);
 
         timer.listen();

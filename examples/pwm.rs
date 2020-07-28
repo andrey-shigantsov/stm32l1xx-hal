@@ -20,8 +20,8 @@ fn main() -> ! {
 
     let mut rcc = dp.RCC.freeze(Config::hsi());
 
-    let mut gpioa = dph.GPIOA.split();
-    let mut gpiob = dph.GPIOB.split();
+    let mut gpioa = dph.GPIOA.split(&mut rcc);
+    let mut gpiob = dph.GPIOB.split(&mut rcc);
     if true { /* Simple tuple */
         let mut (pwm1, pwm2) = dph.TIM9.pwm(
             (gpioa.pa2, gpioa.pa3), 10.khz(), &mut rcc);

@@ -19,7 +19,7 @@ fn main() -> ! {
     let dp = stm32::Peripherals::take().unwrap();
     let mut rcc = dp.RCC.freeze(Config::hsi());
 
-    let gpioa = dp.GPIOA.split();
+    let gpioa = dp.GPIOA.split(&mut rcc);
     let mut dac = dp.DAC.dac(gpioa.pa4, &mut rcc);
 
     let mut dir = Direction::Upcounting;

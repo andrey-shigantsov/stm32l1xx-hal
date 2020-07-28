@@ -22,7 +22,7 @@ fn main() -> ! {
     let mut rcc = dp.RCC.freeze(Config::hsi());
     let mut delay = cp.SYST.delay(rcc.clocks);
 
-    let gpioa = dp.GPIOA.split();
+    let gpioa = dp.GPIOA.split(&mut rcc);
     let qei = dp.TIM2.qei((gpioa.pa0, gpioa.pa1), &mut rcc);
 
     loop {
