@@ -7,6 +7,7 @@ use crate::gpio::gpiob::{PB10, PB11};
 use crate::gpio::{AltMode, Floating, Input};
 use crate::rcc::Rcc;
 use crate::stm32::{USART1, USART2, USART3};
+use crate::stm32::Interrupt;
 use hal;
 use hal::prelude::*;
 use nb::block;
@@ -152,6 +153,24 @@ pub struct Serial<USART> {
     tx: Tx<USART>,
 }
 
+/// Serial abstraction interrupt trait
+pub trait SerialInterrupt {
+    // Return interrupt number
+    fn irq() -> Interrupt;
+
+    /// Starts listening for an interrupt event
+    fn listen(&mut self, event: Event);
+
+    // Return listening for an interrupt event status
+    fn listening(&self, event: Event) -> bool;
+
+    /// Stop listening for an interrupt event
+    fn unlisten(&mut self, event: Event);
+
+    /// Clears interrupt flag
+    fn clear_irq(&mut self, event: Event);
+}
+
 /// Serial receiver
 pub struct Rx<USART> {
     _usart: PhantomData<USART>,
@@ -251,8 +270,18 @@ macro_rules! usart {
                     })
                 }
 
+                pub fn split(self) -> (Tx<$USARTX>, Rx<$USARTX>) {
+                    (self.tx, self.rx)
+                }
+
+                pub fn release(self) -> $USARTX {
+                    self.usart
+                }
+            }
+
+            impl SerialInterrupt for Serial<$USARTX> {
                 /// Starts listening for an interrupt event
-                pub fn listen(&mut self, event: Event) {
+                fn listen(&mut self, event: Event) {
                     match event {
                         Event::Rxne => {
                             self.usart.cr1.modify(|_, w| w.rxneie().set_bit())
@@ -266,8 +295,25 @@ macro_rules! usart {
                     }
                 }
 
+                // Return listening for an interrupt event status
+                fn listening(&self, event: Event) -> bool {
+                    // NOTE(unsafe) atomic read with no side effects
+                    let cr1 = unsafe { (*$USARTX::ptr()).cr1.read() };
+                    match event {
+                        Event::Rxne => {
+                            cr1.rxneie().bit_is_set()
+                        },
+                        Event::Txe => {
+                            cr1.txeie().bit_is_set()
+                        },
+                        Event::Idle => {
+                            cr1.idleie().bit_is_set()
+                        },
+                    }
+                }
+
                 /// Stop listening for an interrupt event
-                pub fn unlisten(&mut self, event: Event) {
+                fn unlisten(&mut self, event: Event) {
                     match event {
                         Event::Rxne => {
                             self.usart.cr1.modify(|_, w| w.rxneie().clear_bit())
@@ -281,19 +327,16 @@ macro_rules! usart {
                     }
                 }
 
+                // Return interrupt number
+                fn irq() -> Interrupt {
+                    Interrupt::$USARTX
+                }
+
                 /// Clears interrupt flag
-                pub fn clear_irq(&mut self, event: Event) {
+                fn clear_irq(&mut self, event: Event) {
                     if let Event::Rxne = event {
-                       self.usart.sr.modify(|_, w| w.rxne().clear_bit())
+                        self.usart.sr.modify(|_, w| w.rxne().clear_bit())
                     }
-                }
-
-                pub fn split(self) -> (Tx<$USARTX>, Rx<$USARTX>) {
-                    (self.tx, self.rx)
-                }
-
-                pub fn release(self) -> $USARTX {
-                    self.usart
                 }
             }
 
