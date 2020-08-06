@@ -76,7 +76,7 @@ macro_rules! gpio {
 
             use hal::digital::v2::{toggleable, InputPin, OutputPin, StatefulOutputPin};
             use crate::stm32::$GPIOX;
-            use crate::rcc::Rcc;
+            // use crate::rcc::Rcc;
             use super::{
                 Floating, GpioExt, Input, OpenDrain, Output, Speed,
                 PullDown, PullUp, PushPull, AltMode, Analog
