@@ -12,6 +12,7 @@ use crate::time::Hertz;
 pub struct I2c<I2C, PINS> {
     i2c: I2C,
     pins: PINS,
+    pub timeout: usize,
 }
 
 pub trait Pins<I2c> {
@@ -128,7 +129,7 @@ macro_rules! i2c {
                 // Enable the I2C processing
                 i2c.cr1.modify(|_, w| w.pe().set_bit());
 
-                I2c { i2c, pins }
+                I2c { i2c, pins, timeout: 1_000_000 }
             }
 
             pub fn release(self) -> ($I2CX, PINS) {
@@ -157,14 +158,32 @@ macro_rules! i2c {
                 Ok(sr1)
             }
 
+            fn wait<F>(&self, fx: F) -> Result<(), Error>
+                where F: Fn() -> Result<bool,Error>
+            {
+                let mut counter = 0_usize;
+                let mut is_timeout = false;
+                while fx()? {
+                    counter += 1;
+                    if counter >= self.timeout {
+                        is_timeout = true;
+                        break;
+                    }
+                };
+                if is_timeout {
+                    Err(Error::TIMEOUT)
+                } else {
+                    Ok(())
+                }
+            }
+
             fn sr1_wait<F>(&self, fx: F) -> Result<(), Error>
                 where F: Fn(crate::stm32::i2c1::sr1::R) -> bool
             {
-                while {
+                self.wait(|| {
                     let sr1 = self.sr1_read()?;
-                    fx(sr1)
-                } {};
-                Ok(())
+                    Ok(fx(sr1))
+                })
             }
 
             fn send_byte(&self, byte: u8) -> Result<(), Error> {
@@ -214,10 +233,10 @@ macro_rules! i2c {
                 self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
 
                 // Also wait until signalled we're master and everything is waiting for us
-                while {
+                self.wait(|| {
                     let sr2 = self.i2c.sr2.read();
-                    sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear()
-                } {}
+                    Ok(sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear())
+                })?;
 
                 // Set up current address, we're trying to talk to
                 self.i2c
@@ -253,10 +272,10 @@ macro_rules! i2c {
                 self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
 
                 // Also wait until signalled we're master and everything is waiting for us
-                while {
+                self.wait(|| {
                     let sr2 = self.i2c.sr2.read();
-                    sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear()
-                } {}
+                    Ok(sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear())
+                })?;
 
                 // Set up current address, we're trying to talk to
                 self.i2c
