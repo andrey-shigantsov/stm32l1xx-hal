@@ -13,7 +13,7 @@ use hal::prelude::*;
 use nb::block;
 
 /// Serial error
-#[derive(Debug)]
+#[derive(Clone,Copy,Debug)]
 pub enum Error {
     /// Framing error
     Framing,
@@ -169,6 +169,9 @@ pub trait SerialInterrupt {
 
     /// Clears interrupt flag
     fn clear_irq(&mut self, event: Event);
+
+    /// Clears error flag
+    fn clear_error(&mut self, err: Error);
 }
 
 /// Serial receiver
@@ -295,7 +298,7 @@ macro_rules! usart {
                     }
                 }
 
-                // Return listening for an interrupt event status
+                /// Return listening for an interrupt event status
                 fn listening(&self, event: Event) -> bool {
                     // NOTE(unsafe) atomic read with no side effects
                     let cr1 = unsafe { (*$USARTX::ptr()).cr1.read() };
@@ -327,15 +330,38 @@ macro_rules! usart {
                     }
                 }
 
-                // Return interrupt number
+                /// Return interrupt number
                 fn irq() -> Interrupt {
                     Interrupt::$USARTX
                 }
 
                 /// Clears interrupt flag
                 fn clear_irq(&mut self, event: Event) {
-                    if let Event::Rxne = event {
-                        self.usart.sr.modify(|_, w| w.rxne().clear_bit())
+                    match event {
+                        Event::Rxne => {
+                            self.usart.sr.modify(|_, w| w.rxne().clear_bit())
+                        },
+                        _ => {},
+                    }
+                }
+
+                /// Clears error flag
+                fn clear_error(&mut self, err: Error) {
+                    match err {
+                        Error::Framing => {
+                            unimplemented!();
+                        },
+                        Error::Noise => {
+                            unimplemented!();
+                        },
+                        Error::Overrun => {
+                            self.usart.sr.read();
+                            self.usart.dr.read();
+                        },
+                        Error::Parity => {
+                            unimplemented!();
+                        },
+                        Error::_Extensible => {},
                     }
                 }
             }
