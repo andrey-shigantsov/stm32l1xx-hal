@@ -1,5 +1,6 @@
 use crate::stm32::RCC;
 use crate::time::{Hertz, U32Ext};
+use crate::gpio;
 
 /// System clock mux source
 pub enum ClockSrc {
@@ -126,27 +127,21 @@ impl Config {
     pub fn hsi() -> Config {
         Config {
             mux: ClockSrc::HSI,
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
+            ..Default::default()
         }
     }
 
     pub fn msi(range: MSIRange) -> Config {
         Config {
             mux: ClockSrc::MSI(range),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
+            ..Default::default()
         }
     }
 
     pub fn pll(pll_src: PLLSource, pll_mul: PLLMul, pll_div: PLLDiv) -> Config {
         Config {
             mux: ClockSrc::PLL(pll_src, pll_mul, pll_div),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
+            ..Default::default()
         }
     }
 
@@ -156,9 +151,7 @@ impl Config {
     {
         Config {
             mux: ClockSrc::HSE(freq.into()),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
+            ..Default::default()
         }
     }
 }
@@ -167,6 +160,20 @@ impl Config {
 pub struct Rcc {
     pub clocks: Clocks,
     pub(crate) rb: RCC,
+}
+
+impl Rcc {
+    pub fn mco(&mut self, pin: gpio::gpioa::PA8<gpio::Input<gpio::Floating>>, cfg: MCOConfig) -> MCO {
+        self.rb.cfgr.modify(|_, w| unsafe {
+            w.mcosel().bits(cfg.src as u8)
+            .mcopre().bits(cfg.div as u8)
+        });
+
+        let pin = pin.into_push_pull_output().set_speed(gpio::Speed::High);
+        pin.set_alt_mode(gpio::AltMode::SYSTEM);
+
+        MCO { pin }
+    }
 }
 
 /// Extension trait that freezes the `RCC` peripheral with provided clocks configuration
@@ -206,6 +213,7 @@ impl RccExt for RCC {
             ClockSrc::PLL(src, mul, div) => {
                 let (src_bit, freq) = match src {
                     PLLSource::HSE(freq) => {
+                        assert!(freq <= 24.mhz());
                         // Enable HSE
                         self.cr.write(|w| w.hseon().set_bit());
                         while self.cr.read().hserdy().bit_is_clear() {}
@@ -243,7 +251,8 @@ impl RccExt for RCC {
                     PLLDiv::Div3 => freq / 3,
                     PLLDiv::Div4 => freq / 4,
                 };
-                assert!(freq <= 24.mhz().0);
+
+                assert!(freq <= 32.mhz().0);
 
                 self.cfgr.write(move |w| unsafe {
                     w.pllmul()
@@ -263,14 +272,10 @@ impl RccExt for RCC {
         };
 
         self.cfgr.modify(|_, w| unsafe {
-            w.sw()
-                .bits(sw_bits)
-                .hpre()
-                .bits(cfgr.ahb_pre as u8)
-                .ppre1()
-                .bits(cfgr.apb1_pre as u8)
-                .ppre2()
-                .bits(cfgr.apb2_pre as u8)
+            w.sw().bits(sw_bits)
+            .hpre().bits(cfgr.ahb_pre as u8)
+            .ppre1().bits(cfgr.apb1_pre as u8)
+            .ppre2().bits(cfgr.apb2_pre as u8)
         });
 
         let ahb_freq = match cfgr.ahb_pre {
@@ -349,5 +354,115 @@ impl Clocks {
     /// Returns the frequency of the APB2 timers
     pub fn apb2_tim_clk(&self) -> Hertz {
         self.apb2_tim_clk
+    }
+}
+
+/// MCO source
+#[derive(Clone, Copy, PartialEq)]
+pub enum MCOSource {
+    Disabled = 0b000,
+    SYSCLK = 0b001,
+    HSI = 0b010,
+    MSI = 0b011,
+    HSE = 0b100,
+    PLL = 0b101,
+    LSI = 0b110,
+    LSE = 0b111,
+}
+
+// MCO prescaler
+#[derive(Clone, Copy)]
+pub enum MCOPrescaler {
+    Div1 = 0b000,
+    Div2 = 0b001,
+    Div4 = 0b010,
+    Div8 = 0b011,
+    Div16 = 0b100,
+}
+
+/// MCO mode
+pub struct MCOConfig {
+    src: MCOSource,
+    div: MCOPrescaler,
+}
+
+impl Default for MCOConfig {
+    fn default() -> Self {
+        Self {
+            src: MCOSource::Disabled,
+            div: MCOPrescaler::Div1,
+        }
+    }
+}
+
+impl MCOConfig {
+    pub fn new(src: MCOSource, div: MCOPrescaler) -> Self {
+        Self { src, div }
+    }
+
+    pub fn prescaler(mut self, div: MCOPrescaler) -> Self {
+        self.div = div;
+        self
+    }
+
+    pub fn disabled() -> Self {
+        Self {
+            src: MCOSource::Disabled,
+            ..Default::default()
+        }
+    }
+    
+    pub fn sys_clk() -> Self {
+        Self {
+            src: MCOSource::SYSCLK,
+            ..Default::default()
+        }
+    }
+
+    pub fn hsi() -> Self {
+		Self {
+			src: MCOSource::HSI,
+			..Default::default()
+		}
+	}
+    pub fn msi() -> Self {
+		Self {
+			src: MCOSource::MSI,
+			..Default::default()
+		}
+	}
+    pub fn hse() -> Self {
+		Self {
+			src: MCOSource::HSE,
+			..Default::default()
+		}
+	}
+    pub fn pll() -> Self {
+		Self {
+			src: MCOSource::PLL,
+			..Default::default()
+		}
+	}
+    pub fn lsi() -> Self {
+		Self {
+			src: MCOSource::LSI,
+			..Default::default()
+		}
+	}
+    pub fn lse() -> Self {
+		Self {
+			src: MCOSource::LSE,
+			..Default::default()
+		}
+	}
+}
+
+pub struct MCO {
+    pin: gpio::gpioa::PA8<gpio::Output<gpio::PushPull>>
+}
+
+impl MCO {
+    pub fn release(self) -> gpio::gpioa::PA8<gpio::Output<gpio::PushPull>> {
+        self.pin
     }
 }
