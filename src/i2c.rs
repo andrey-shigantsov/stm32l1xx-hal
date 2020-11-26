@@ -6,6 +6,7 @@ use crate::gpio::{AltMode, OpenDrain, Output};
 use crate::prelude::*;
 use crate::rcc::Rcc;
 use crate::stm32::{I2C1, I2C2};
+// use crate::stm32::Interrupt;
 use crate::time::Hertz;
 
 /// I2C abstraction
@@ -13,6 +14,9 @@ pub struct I2c<I2C, PINS> {
     i2c: I2C,
     pins: PINS,
     pub timeout: usize,
+    pub event_driven: bool,
+    state: State,
+    txn: Option<Transaction>,
 }
 
 pub trait Pins<I2c> {
@@ -40,6 +44,9 @@ pub enum Error {
     TIMEOUT,
     BUS,
     ARBTRN_LOST,
+    
+    General,
+    WouldBlock,
 }
 
 macro_rules! i2c {
@@ -129,7 +136,13 @@ macro_rules! i2c {
                 // Enable the I2C processing
                 i2c.cr1.modify(|_, w| w.pe().set_bit());
 
-                I2c { i2c, pins, timeout: 1_000_000 }
+                I2c { 
+                    i2c, pins,
+                    timeout: 1_000_000,
+                    event_driven: false,
+                    state: State::Idle,
+                    txn: None,
+                }
             }
 
             pub fn release(self) -> ($I2CX, PINS) {
@@ -186,39 +199,211 @@ macro_rules! i2c {
                 })
             }
 
-            fn send_byte(&self, byte: u8) -> Result<(), Error> {
-                // Wait until we're ready for sending
-                self.sr1_wait(|sr1| sr1.tx_e().bit_is_clear())?;
+            fn txn_addr(&self) -> u8 {
+                if let Some(txn) = self.txn.as_ref() {
+                    txn.addr
+                } else {
+                    0
+                }
+            }
+            fn txn_need_sending(&self) -> bool {
+                if let Some(txn) = self.txn.as_ref() {
+                    txn.need_sending()
+                } else {
+                    false
+                }
+            }
+            fn txn_need_receiving(&self) -> bool {
+                if let Some(txn) = self.txn.as_ref() {
+                    txn.need_receiving()
+                } else {
+                    false
+                }
+            }
+            fn txn_mode(&self) -> Result<u8/* 0 - tx, 1 - rx */, Error> {
+                if let Some(txn) = self.txn.as_ref() {
+                    txn.mode().ok_or(Error::General)
+                } else {
+                    Err(Error::General)
+                }
+            }
+            fn txn_next_byte_for_send(&mut self) -> Result<Option<u8>, Error> {
+                if let Some(txn) = self.txn.as_mut() {
+                    Ok(txn.next_byte_for_send())
+                } else {
+                    Err(Error::General)
+                }
+            }
+            fn txn_save_recv_byte(&mut self, byte: u8) -> Result<Option<bool>, Error> {
+                if let Some(txn) = self.txn.as_mut() {
+                    Ok(txn.save_recv_byte(byte))
+                } else {
+                    Err(Error::General)
+                }
+            }
+            fn txn_handler(&mut self) -> Result<(), Error> {
+                if !(self.txn_need_sending() || self.txn_need_receiving()) {
+                    return Err(Error::General);
+                }
+                               
+                if self.txn_need_sending() {
+                    self.start_sending();
+                    self.polling_common_handler()?;
 
-                // Push out a byte of data
-                self.i2c.dr.write(|w| unsafe { w.bits(u32::from(byte)) });
+                    // Send bytes
+                    while self.txn_need_sending() {
+                        // Wait until we're ready for sending
+                        self.sr1_wait(|sr1| sr1.tx_e().bit_is_clear())?;
 
-                // While until byte is transferred
-                self.sr1_wait(|sr1| sr1.btf().bit_is_clear())?;
+                        // Push out a byte of data
+                        self.event_handler(Event::ReadyForSend)?;
+
+                        // While until byte is transferred
+                        self.sr1_wait(|sr1| sr1.btf().bit_is_clear())?;
+
+                        self.event_handler(Event::Sent)?;
+                    }
+                }
+
+                if self.txn_need_receiving() {
+                    self.start_receiving();
+                    self.polling_common_handler()?;
+
+                    // Receive bytes into buffer
+                    while self.txn_need_receiving() {
+                        // Wait until we're ready for receiving
+                        self.sr1_wait(|sr1| sr1.rx_ne().bit_is_clear())?;
+                        
+                        self.event_handler(Event::ReadyForRecv)?;                        
+                    }
+                }
 
                 Ok(())
             }
 
-            fn recv_byte(&self) -> Result<u8, Error> {
-                self.sr1_wait(|sr1| sr1.rx_ne().bit_is_clear())?;
-                let value = self.i2c.dr.read().bits() as u8;
-                Ok(value)
+            fn start_sending(&mut self) {
+                // Send a START condition
+                self.i2c.cr1.modify(|_, w| w.start().set_bit());
+                self.state = State::Wait(Event::Started);
+            }
+
+            fn start_receiving(&mut self) {
+                // Send a START condition and set ACK bit
+                self.i2c.cr1.modify(|_, w|
+                    w.start().set_bit().ack().set_bit()
+                );
+                self.state = State::Wait(Event::Started);
+            }
+
+            fn polling_common_handler(&mut self) -> Result<(), Error> {
+                use Event::*;
+
+                if self.event_driven {
+                    return Err(Error::WouldBlock);
+                }
+
+                // Wait until START condition was generated
+                self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
+
+                // Set state to wait for MasterReady
+                self.event_handler(Started)?;
+
+                // Also wait until signalled we're master and everything is waiting for us
+                self.wait(|| {
+                    let sr2 = self.i2c.sr2.read();
+                    Ok(sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear())
+                })?;
+
+                // Set up current address, we're trying to talk to
+                self.event_handler(MasterReady)?;
+
+                // Wait until address was sent
+                self.sr1_wait(|sr1| sr1.addr().bit_is_clear())?;
+
+                // Clear condition by reading SR2
+                self.event_handler(AddressSent)?;
+
+                Ok(())
+            }
+
+            pub fn event_handler(&mut self, evt: Event) -> Result<(), Error> {
+                use {State::*, Event::*};
+                match self.state {
+                    Wait(wait_evt) => {
+                        if evt != wait_evt {
+                            return Ok(());
+                        }
+                        match evt {
+                            Started => {
+                                self.state = Wait(MasterReady);
+                            },
+                            MasterReady => {
+                                let mode = self.txn_mode()? as u32;
+                                // Set up current address, we're trying to talk to
+                                self.i2c.dr.write(|w| unsafe {
+                                    w.bits((u32::from(self.txn_addr()) << 1) + mode)
+                                });
+                                self.state = Wait(AddressSent);
+                            },
+                            AddressSent => {
+                                // Clear condition by reading SR2
+                                self.i2c.sr2.read();
+
+                                match self.txn_mode()? {
+                                    0 /*tx*/ => {
+                                        self.state = Wait(ReadyForSend);
+                                    },
+                                    1 /*rx*/ => {
+                                        self.state = Wait(ReadyForRecv);
+                                    },
+                                    _ => {}
+                                }
+                            },
+                            ReadyForSend => {
+                                if let Some(byte) = self.txn_next_byte_for_send()? {
+                                    self.i2c.dr.write(|w| unsafe { w.bits(u32::from(byte)) });
+                                    self.state = Wait(Sent);
+                                } else {
+                                    self.state = Idle;
+                                }
+                            },
+                            Sent => {
+                                if self.txn_need_sending() {
+                                    self.state = Wait(ReadyForSend);
+                                } else {
+                                    self.state = Idle;
+                                }
+                            },
+                            ReadyForRecv => {
+                                let byte = self.i2c.dr.read().bits() as u8;
+                                if let Some(finish) = self.txn_save_recv_byte(byte)? {
+                                    if finish {
+                                        self.state = Idle;
+                                        // Send STOP condition
+                                        self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                                    } else {
+                                        self.state = Wait(ReadyForRecv);
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    _ => {}
+                }
+                Ok(())
             }
         }
 
         impl<PINS> WriteRead for I2c<$I2CX, PINS> {
             type Error = Error;
 
-            fn write_read(
-                &mut self,
-                addr: u8,
-                bytes: &[u8],
-                buffer: &mut [u8],
+            fn write_read(&mut self, addr: u8,
+                tx_buf: &[u8], rx_buf: &mut [u8],
             ) -> Result<(), Self::Error> {
-                self.write(addr, bytes)?;
-                self.read(addr, buffer)?;
-
-                Ok(())
+                self.txn = Some(Transaction::write_read(
+                    addr, tx_buf, rx_buf,
+                ));
+                self.txn_handler()
             }
         }
 
@@ -226,36 +411,8 @@ macro_rules! i2c {
             type Error = Error;
 
             fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-                // Send a START condition
-                self.i2c.cr1.modify(|_, w| w.start().set_bit());
-
-                // Wait until START condition was generated
-                self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
-
-                // Also wait until signalled we're master and everything is waiting for us
-                self.wait(|| {
-                    let sr2 = self.i2c.sr2.read();
-                    Ok(sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear())
-                })?;
-
-                // Set up current address, we're trying to talk to
-                self.i2c
-                    .dr
-                    .write(|w| unsafe { w.bits(u32::from(addr) << 1) });
-
-                // Wait until address was sent
-                self.sr1_wait(|sr1| sr1.addr().bit_is_clear())?;
-
-                // Clear condition by reading SR2
-                self.i2c.sr2.read();
-
-                // Send bytes
-                for c in bytes {
-                    self.send_byte(*c)?;
-                }
-
-                // Fallthrough is success
-                Ok(())
+                self.txn = Some(Transaction::write(addr, bytes));
+                self.txn_handler()
             }
         }
 
@@ -263,41 +420,8 @@ macro_rules! i2c {
             type Error = Error;
 
             fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
-                // Send a START condition and set ACK bit
-                self.i2c
-                    .cr1
-                    .modify(|_, w| w.start().set_bit().ack().set_bit());
-
-                // Wait until START condition was generated
-                self.sr1_wait(|sr1| sr1.sb().bit_is_clear())?;
-
-                // Also wait until signalled we're master and everything is waiting for us
-                self.wait(|| {
-                    let sr2 = self.i2c.sr2.read();
-                    Ok(sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear())
-                })?;
-
-                // Set up current address, we're trying to talk to
-                self.i2c
-                    .dr
-                    .write(|w| unsafe { w.bits((u32::from(addr) << 1) + 1) });
-
-                // Wait until address was sent
-                self.sr1_wait(|sr1| sr1.addr().bit_is_clear())?;
-
-                // Clear condition by reading SR2
-                self.i2c.sr2.read();
-
-                // Receive bytes into buffer
-                for c in buffer {
-                    *c = self.recv_byte()?;
-                }
-
-                // Send STOP condition
-                self.i2c.cr1.modify(|_, w| w.stop().set_bit());
-
-                // Fallthrough is success
-                Ok(())
+                self.txn = Some(Transaction::read(addr, buffer));
+                self.txn_handler()
             }
         }
 
@@ -318,6 +442,98 @@ pub trait I2cExt<I2C> {
     where
         PINS: Pins<I2C>,
         T: Into<Hertz>;
+}
+
+#[derive(Copy,Clone,Debug,PartialEq)]
+pub enum Event {
+    Started, // START condition was generated
+    MasterReady, // we're master and everything is waiting for us
+    AddressSent, // Address was sent
+    ReadyForSend, // we're ready for sending byte
+    Sent, // Byte is transferred
+    ReadyForRecv, // we're ready for receiving byte
+}
+enum State {
+    Idle,
+    Wait(Event),
+}
+
+struct Transaction {
+    addr: u8,
+    tx_buf: Option<(*const u8, usize)>,
+    rx_buf: Option<(*mut u8, usize)>,
+    tx_counter: usize,
+    rx_counter: usize,
+}
+impl Transaction {
+    fn new(addr: u8, tx_buf: Option<(*const u8, usize)>, rx_buf: Option<(*mut u8, usize)>) -> Self {
+        Self {
+            addr, tx_buf, rx_buf,
+            tx_counter: 0, rx_counter: 0,
+        }
+    }
+    pub fn write(addr: u8, buf: &[u8]) -> Self {
+        Self::new(addr, Some((buf.as_ptr(),buf.len())), None)
+    }
+    pub fn read(addr: u8, buf: &mut [u8]) -> Self {
+        Self::new(addr, None, Some((buf.as_mut_ptr(),buf.len())))
+    }
+    pub fn write_read(addr: u8, tx_buf: &[u8], rx_buf: &mut [u8]) -> Self {
+        Self::new(addr, 
+            Some((tx_buf.as_ptr(),tx_buf.len())), 
+            Some((rx_buf.as_mut_ptr(),rx_buf.len()))
+        )
+    }
+
+    pub fn need_sending(&self) -> bool {
+        if let Some((_ptr,len)) = self.tx_buf.as_ref() {
+            self.tx_counter < *len
+        } else {
+            false
+        }
+    }
+    pub fn need_receiving(&self) -> bool {
+        if let Some((_ptr,len)) = self.rx_buf.as_ref() {
+            self.rx_counter < *len
+        } else {
+            false
+        }
+    }
+    pub fn mode(&self) -> Option<u8> {
+        if self.need_sending() {
+            Some(0)
+        } else if self.need_receiving() {
+            Some(1)
+        } else {
+            None
+        }        
+    }
+    pub fn next_byte_for_send(&mut self) -> Option<u8> {
+        if let Some((ptr,len)) = self.tx_buf.as_ref() {
+            if self.tx_counter >= *len {
+                None
+            } else {
+                let byte = unsafe { *ptr.offset(self.tx_counter as isize) };
+                self.tx_counter += 1;
+                Some(byte)
+            }
+        } else {
+            None
+        }
+    }
+    pub fn save_recv_byte(&mut self, byte: u8) -> Option<bool> {
+        if let Some((ptr,len)) = self.rx_buf.as_mut() {
+            if self.rx_counter >= *len {
+                None
+            } else {
+                unsafe { *ptr.offset(self.rx_counter as isize) = byte; }
+                self.rx_counter += 1;
+                Some(self.rx_counter >= *len)
+            }
+        } else {
+            None
+        }
+    }
 }
 
 i2c!(I2C1, i2c1, i2c1en, i2c1rst);
