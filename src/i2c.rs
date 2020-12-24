@@ -302,6 +302,7 @@ macro_rules! i2c {
             fn start_sending(&mut self) {
                 // Send a START condition
                 self.i2c.cr1.modify(|_, w| w.start().set_bit());
+                
                 self.state = State::Wait(Event::Started);
             }
 
@@ -310,7 +311,15 @@ macro_rules! i2c {
                 self.i2c.cr1.modify(|_, w|
                     w.start().set_bit().ack().set_bit()
                 );
+                
                 self.state = State::Wait(Event::Started);
+            }
+
+            fn stop(&mut self) {
+                // Send STOP condition
+                self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                
+                self.state = State::Idle;
             }
 
             fn polling_common_handler(&mut self) -> Result<(), Error> {
@@ -380,6 +389,17 @@ macro_rules! i2c {
         }
 
         impl<PINS> EventDriven for I2c<$I2CX, PINS> {
+            fn enable_irqs(&mut self) {
+                self.buffer_irq_enable();
+                self.event_irq_enable();
+                self.error_irq_enable();
+            }
+            fn disable_irqs(&mut self) {
+                self.buffer_irq_disable();
+                self.event_irq_disable();
+                self.error_irq_disable();
+            }        
+
             fn start_transaction(&mut self, txn: Transaction) -> Result<(),Error> {
                 self.event_driven = true;
                 self.txn = Some(txn);
@@ -486,11 +506,6 @@ macro_rules! i2c {
                                 if let Some(byte) = self.txn_next_byte_for_send()? {
                                     self.i2c.dr.write(|w| unsafe { w.bits(u32::from(byte)) });
                                     self.state = Wait(Sent);
-                                } else if self.event_driven && self.txn_need_receiving() {
-                                    self.start_receiving();
-                                } else {
-                                    self.state = Idle;
-                                    return Ok(true);
                                 }
                             },
                             Sent => {
@@ -499,7 +514,7 @@ macro_rules! i2c {
                                 } else if self.event_driven && self.txn_need_receiving() {
                                     self.start_receiving();
                                 } else {
-                                    self.state = Idle;
+                                    self.stop();
                                     return Ok(true);
                                 }
                             },
@@ -507,10 +522,7 @@ macro_rules! i2c {
                                 let byte = self.i2c.dr.read().bits() as u8;
                                 if let Some(finish) = self.txn_save_recv_byte(byte)? {
                                     if finish {
-                                        // Send STOP condition
-                                        self.i2c.cr1.modify(|_, w| w.stop().set_bit());
-                                        
-                                        self.state = Idle;
+                                        self.stop();
                                         return Ok(true);
                                     } else {
                                         self.state = Wait(ReadyForRecv);
@@ -649,6 +661,9 @@ impl Transaction {
 }
 
 pub trait EventDriven {
+    fn enable_irqs(&mut self);
+    fn disable_irqs(&mut self);
+
     fn start_transaction(&mut self, txn: Transaction) -> Result<(),Error>;
     fn finish_transaction(&mut self) -> Result<Transaction,Error>;
     fn is_transaction(&mut self) -> bool;
