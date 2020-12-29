@@ -17,6 +17,7 @@ pub trait DacOut<V> {
 
 pub trait DacPin {
     fn enable(&mut self);
+    fn disable(&mut self);
 }
 
 pub trait Pins<DAC> {
@@ -55,6 +56,11 @@ macro_rules! dac {
             fn enable(&mut self) {
                 unsafe {
                     (*DAC::ptr()).cr.modify(|_, w| w.$en().set_bit());
+                }
+            }
+            fn disable(&mut self) {
+                unsafe {
+                    (*DAC::ptr()).cr.modify(|_, w| w.$en().clear_bit());
                 }
             }
         }
