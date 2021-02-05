@@ -19,7 +19,7 @@ pub struct VTemp;
 pub struct VRef;
 
 /// ADC Result Alignment
-#[derive(PartialEq)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum Align {
     /// Right aligned results (least significant bits)
     ///
@@ -81,15 +81,27 @@ impl Adc {
     pub fn set_sample_time(&mut self, t_samp: SampleTime) {
         self.sample_time = t_samp;
     }
+    /// Get the Adc sampling time
+    pub fn sample_time(&self) -> SampleTime {
+        self.sample_time
+    }
 
     /// Set the Adc result alignment
     pub fn set_align(&mut self, align: Align) {
         self.align = align;
     }
+    /// Get the Adc result alignment
+    pub fn align(&self) -> Align {
+        self.align
+    }
 
     /// Set the Adc precision
     pub fn set_precision(&mut self, precision: Precision) {
         self.precision = precision;
+    }
+    /// Get the Adc precision
+    pub fn precision(&self) -> Precision {
+        self.precision
     }
 
     fn power_up(&mut self) {
